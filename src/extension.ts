@@ -172,8 +172,10 @@ async function startLanguageServer() {
         revealOutputChannelOn: RevealOutputChannelOn.Never
     }
 
-        // Create the language client and start the client.
-    g_languageClient = new LanguageClient('Julia Language Server', serverOptions, clientOptions);
+    let forceDebug = vscode.workspace.getConfiguration('julia').get<boolean>('forceDebug');
+
+    // Create the language client and start the client.
+    g_languageClient = new LanguageClient('Julia Language Server', serverOptions, clientOptions, forceDebug);
     g_languageClient.registerProposedFeatures()
 
     // Push the disposable to the context's subscriptions so that the
