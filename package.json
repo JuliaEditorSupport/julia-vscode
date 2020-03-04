@@ -5,6 +5,7 @@
     "version": "0.14.12",
     "preview": false,
     "publisher": "julialang",
+    "enableProposedApi": true,
     "engines": {
         "vscode": "^1.41.0"
     },
