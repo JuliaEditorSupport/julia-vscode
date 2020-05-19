@@ -793,6 +793,27 @@ async function executeJuliaBlockInRepl() {
     }
 }
 
+export async function decorateSelection() {
+    if (vscode.workspace.getConfiguration('julia').get('highlightCurrentBlock')) {
+        let doc = vscode.window.activeTextEditor;
+        let decor :vscode.DecorationOptions[] = [];
+
+        let ret_val: vscode.Position[] = await g_languageClient.sendRequest('julia/getCurrentBlockRange', { textDocument: vslc.TextDocumentIdentifier.create(doc.document.uri.toString()), position: new vscode.Position(doc.selection.start.line, doc.selection.start.character) });
+        let start_pos = new vscode.Position(ret_val[0].line, ret_val[0].character)
+        let end_pos = new vscode.Position(ret_val[1].line, ret_val[1].character)
+        let rng = new vscode.Range(start_pos, end_pos);
+
+        decor.push({range: rng});
+        doc.setDecorations(CurrentBlockDecor, decor)
+}
+}
+
+const CurrentBlockDecor = vscode.window.createTextEditorDecorationType({
+    backgroundColor: new vscode.ThemeColor("editor.inactiveSelectionBackground"), 
+    isWholeLine: true
+});
+
+
 export async function replStartDebugger(pipename: string) {
     await startREPL(true)
 
