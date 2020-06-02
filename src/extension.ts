@@ -60,7 +60,6 @@ export async function activate(context: vscode.ExtensionContext) {
     await juliaexepath.getJuliaExePath(); // We run this function now and await to make sure we don't run in twice simultaneously later
     repl.activate(context, g_settings);
     weave.activate(context, g_settings);
-    tasks.activate(context, g_settings);
     smallcommands.activate(context, g_settings);
     packagepath.activate(context, g_settings);
     openpackagedirectory.activate(context, g_settings);
@@ -77,6 +76,10 @@ export async function activate(context: vscode.ExtensionContext) {
         let pkgenvpath = await jlpkgenv.getEnvPath();
         return pkgenvpath;
     });
+
+    if (vscode.workspace.rootPath) {
+        tasks.activate(context, g_settings);
+    }
 
     // Start language server
     startLanguageServer();
@@ -151,7 +154,10 @@ async function startLanguageServer() {
     };
 
     let clientOptions: LanguageClientOptions = {
-        documentSelector: ['julia', 'juliamarkdown'],
+        documentSelector: [
+            { language: 'julia', scheme: 'file' },
+            { language: 'juliamarkdown', scheme: 'file' },
+        ],
         synchronize: {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/*.{jl,jmd}')
         },
