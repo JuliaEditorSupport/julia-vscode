@@ -249,6 +249,10 @@ implements vscode.DebugConfigurationProvider {
                 config.juliaEnv = '${command:activeJuliaEnvironment}'
             }
 
+            if (!config.console) {
+                config.console = 'integratedTerminal'
+            }
+
             return config
         })()
     }
