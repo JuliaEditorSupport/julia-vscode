@@ -1,3 +1,4 @@
+import * as fs from 'async-file'
 import * as path from 'path'
 import * as vscode from 'vscode'
 import * as telemetry from '../telemetry'
@@ -18,6 +19,8 @@ export function activate(context: vscode.ExtensionContext) {
     g_plotNavigatorProvider = new PlotNavigatorProvider(context)
 
     context.subscriptions.push(
+        registerCommand('language-julia.copy-plot', requestCopyPlot),
+        registerCommand('language-julia.save-plot', requestExportPlot),
         registerCommand('language-julia.show-plotpane', showPlotPane),
         registerCommand('language-julia.plotpane-previous', plotPanePrev),
         registerCommand('language-julia.plotpane-next', plotPaneNext),
@@ -31,8 +34,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 interface Plot {
-    thumbnail_type: string,
-    thumbnail_data: string
+    thumbnail_type: string;
+    thumbnail_data: string;
 }
 
 class PlotNavigatorProvider implements vscode.WebviewViewProvider {
@@ -128,7 +131,6 @@ class PlotNavigatorProvider implements vscode.WebviewViewProvider {
             return
         }
 
-        console.log(this.plotsInfo)
         let innerHTML: string
         if (this.plotsInfo.length > 0) {
             innerHTML = `<div>
@@ -163,16 +165,25 @@ function getPlotPaneContent() {
     }
 }
 
-function plotPanelOnMessage(message) {
-    if (message.type === 'thumbnail') {
-        const thumbnailData = message.value
-        g_plotNavigatorProvider?.setPlotsInfo(plotsInfo => {
-            plotsInfo[g_currentPlotIndex] = {
-                'thumbnail_type': 'image',
-                'thumbnail_data': thumbnailData
-            }
-            return plotsInfo
-        })
+function plotPanelOnMessage(msg) {
+    switch (msg.type) {
+    case 'thumbnail':
+        {
+            const thumbnailData = msg.value
+            g_plotNavigatorProvider?.setPlotsInfo((plotsInfo) => {
+                plotsInfo[g_currentPlotIndex] = {
+                    thumbnail_type: 'image',
+                    thumbnail_data: thumbnailData,
+                }
+                return plotsInfo
+            })
+        }
+        break
+    case 'savePlot':
+        savePlot(msg.value)
+        break
+    case 'copyFailed':
+        vscode.window.showWarningMessage('Failed to copy plot.')
     }
 }
 
@@ -284,19 +295,19 @@ export function plotPaneDelAll() {
 
 // wrap a source string with an <img> tag that shows the content
 // scaled to fit the plot pane unless the plot pane is bigger than the image
-function wrapImagelike(srcstring: string) {
+function wrapImagelike(srcString: string) {
     const html = `
     <html style="padding:0;margin:0;">
         <body style="padding:0;margin:0;">
             <div style="max-width: 100%; max-height: 100vh;">
-                <img id="plot-element" style="max-height: 100%; max-width: 100%; object-fit: scale-down; object-position: 0 0;" src="${srcstring}">
+                <img id="plot-element" style="max-height: 100%; max-width: 100%; object-fit: scale-down; object-position: 0 0;" src="${srcString}">
             </div>
         </body>
     </html>`
     return html
 }
 
-export function displayPlot(params: { kind: string, data: string }) {
+export function displayPlot(params: { kind: string; data: string }) {
     const kind = params.kind
     const payload = params.data
 
@@ -372,7 +383,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega-lite",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -406,7 +418,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega-lite",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -440,7 +453,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega-lite",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -472,7 +486,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -504,7 +519,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -536,7 +552,8 @@ export function displayPlot(params: { kind: string, data: string }) {
                 <script type="text/javascript">
                     var opt = {
                         mode: "vega",
-                        actions: false
+                        actions: false,
+                        renderer: "svg"
                     }
                     var spec = ${payload}
                     vegaEmbed('#plot-element', spec, opt);
@@ -633,5 +650,87 @@ export function displayPlot(params: { kind: string, data: string }) {
 
     if (vscode.workspace.getConfiguration('julia').get('focusPlotNavigator')) {
         g_plotNavigatorProvider?.showPlotNavigator()
+    }
+}
+
+/**
+ * Send export request(message) to the plot pane.
+ */
+function requestExportPlot() {
+    g_plotPanel.webview.postMessage({
+        type: 'requestSavePlot',
+        body: { index: g_currentPlotIndex },
+    })
+}
+
+function requestCopyPlot() {
+    g_plotPanel.webview.postMessage({
+        type: 'requestCopyPlot',
+        body: { index: g_currentPlotIndex },
+    })
+}
+
+interface ExportedPlot {
+  svg?: string;
+  png?: string;
+  gif?: string;
+  index: number;
+}
+
+type FileLike = string | Buffer;
+/**
+ * Write svg file of the plot to the plots directory.
+ * @param plot
+ */
+function savePlot(plot: ExportedPlot) {
+    const plotName = `plot_${plot.index + 1}`
+
+    if (plot.svg !== null) {
+        const fileName = `${plotName}.svg`
+        _writePlotFile(fileName, plot.svg)
+    }
+    else if (plot.png !== null) {
+        const fileName = `${plotName}.png`
+        const buffer = Buffer.from(plot.png, 'base64')
+        _writePlotFile(fileName, buffer)
+    }
+    else if (plot.gif !== null) {
+        const fileName = `${plotName}.gif`
+        const buffer = Buffer.from(plot.gif, 'base64')
+        _writePlotFile(fileName, buffer)
+    }
+    else {
+        vscode.window.showWarningMessage('Failed to save plot, supported formats are svg, png, and gif.')
+    }
+}
+
+
+/**
+ * Write the plot file to disk.
+ * @param fileName
+ * @param data
+ * @param encoding
+ */
+function _writePlotFile(fileName: string, data: FileLike) {
+    const rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath
+    const defaultPlotsDir: string = vscode.workspace
+        .getConfiguration('julia')
+        .get('plots.path') ?? '' // If the default `plots.path` isn't in `settings.json` use the root.
+    const plotsDirFullPath = path.join(rootPath, defaultPlotsDir)
+    const plotFileFullPath = path.join(plotsDirFullPath, fileName)
+
+    try {
+        fs.exists(plotsDirFullPath).then(plotsDirExists => {
+            if (!plotsDirExists) {
+                fs.mkdir(plotsDirFullPath)
+            }
+        })
+        vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file(plotFileFullPath) }).then(saveURI => {
+            fs.writeFile(saveURI.fsPath, data)
+        })
+    } catch (e) {
+        console.error(e)
+        vscode.window.showWarningMessage('Failed to save plot.')
+
     }
 }
